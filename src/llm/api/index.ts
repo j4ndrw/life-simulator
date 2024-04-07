@@ -36,7 +36,13 @@ class LLM<TCallback extends string> {
     const model = this.config.model;
     const stream = this.config.stream ?? false;
 
-    async function* generateAsync(prompt: string) {
+    async function* generateAsync(
+      prompt: string,
+      { temporarySystemPrompt }: { temporarySystemPrompt?: string } = {},
+    ) {
+      if (temporarySystemPrompt) {
+        messages.push({ role: "system", content: temporarySystemPrompt });
+      }
       messages.push({ role: "user", name, content: prompt });
       const params = { model: MODEL[model], messages } as const;
       if (stream) {
@@ -44,6 +50,9 @@ class LLM<TCallback extends string> {
           ...params,
           stream: true,
         });
+        if (temporarySystemPrompt) {
+          messages.push({ role: "system", content: systemPrompt ?? "" });
+        }
         for await (const chunk of result) {
           yield chunk.choices[0]?.delta?.content || "";
         }
@@ -59,8 +68,9 @@ class LLM<TCallback extends string> {
 
     const generate = async (
       prompt: string,
-      options: {
+      { callbacks, temporarySystemPrompt}: {
         callbacks: (TCallback & keyof typeof defaultLLMCallbacks)[];
+        temporarySystemPrompt?: string,
       } = { callbacks: [] },
     ) => {
       const { callbackOptions } = this.config;
@@ -68,20 +78,20 @@ class LLM<TCallback extends string> {
 
       let result = "";
 
-      options.callbacks.forEach((key) => {
+      callbacks.forEach((key) => {
         const callback = callbackOptions?.[key];
         callback?.onTokenGenerationStarted?.(generationId);
       });
 
-      for await (const token of generateAsync(prompt)) {
-        options.callbacks.forEach((key) => {
+      for await (const token of generateAsync(prompt, { temporarySystemPrompt })) {
+        callbacks.forEach((key) => {
           const callback = callbackOptions?.[key];
           callback?.onTokenGenerated?.(token);
         });
         result += token;
       }
 
-      options.callbacks.forEach((key) => {
+      callbacks.forEach((key) => {
         const callback = callbackOptions?.[key];
         callback?.onTokenGenerationEnded?.(result, generationId);
       });
